@@ -1,0 +1,165 @@
+---
+title: "main"
+output: html_document
+date: "2022-12-18"
+---
+```{r}
+#sets up python environment
+library(reticulate)
+use_condaenv("r-reticulate")
+py_install("requests")
+#required r packages: tidyverse
+#required py modules: pandas, bs4
+
+
+```
+
+
+
+```{python}
+#creates a list of webpages and their status code at that time, last row indicates the first (oldest) page of the archive)
+from bs4 import BeautifulSoup
+import pandas
+import urllib3
+import re
+
+num_page = []
+status = []
+i = 1
+
+
+while(True):
+  num_page.append(i)
+  http = urllib3.PoolManager()
+  r = http.request('GET', "https://www.idnes.cz/zpravy/archiv/" + str(i))
+  status.append(r.status)
+  i += 1
+  if r.status != 200:
+    break
+
+dic = {'Page updated for 2022-12-18':num_page,'Status':status}
+
+idnesstatusdf = pandas.DataFrame(dic)
+idnesstatusdf.to_csv("idnesstatusstranek.csv")
+
+```
+
+```{python}
+#version of idnes.cz archive webscraper that uses the slower "requests" library
+import regex
+import requests
+import pandas
+from bs4 import BeautifulSoup
+
+# define the number of pages to scrape
+num_pages = [1, 2, 3, 4, 5]
+
+# create an empty list to store the titles
+titles = []
+text = []
+link_list = []
+idnespagetexts = pandas.DataFrame()
+idnestexty = pandas.DataFrame(
+    {"Title of the article": titles,
+     'URL to the article': link_list,
+     'Text contents of the article': text
+    })
+
+# loop through each page
+for i in num_pages:
+    url = "https://www.idnes.cz/zpravy/archiv/" + str(i)
+    response = requests.get(url)
+    page = requests.get(url).text
+    doc = BeautifulSoup(page, "html.parser")
+    title_elements = doc.select(".art h3")
+    
+    for element in title_elements:
+        title_el = element.text
+        title_el = regex.sub(r'^\s+|\s+$', '', title_el)
+        titles.append(title_el)
+
+    response = requests.get(url)
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, "html.parser")
+        link_elements = soup.select("#list-art-count .art-link")
+        for element in link_elements:
+            link = element["href"]
+            link_list.append(link)
+            linked_response = requests.get(link)
+            if linked_response.status_code == 200:
+                linked_soup = BeautifulSoup(linked_response.text, "html.parser")
+                text.append(linked_soup.select(".opener , #art-text p"))
+
+    idnespagetexts = pandas.DataFrame(
+    {"Title of the article": titles,
+     'URL to the article': link_list,
+     'Text contents of the article': text
+    })
+
+    idnestexty = idnestexty.append(idnespagetexts)
+
+
+```
+
+```{python}
+
+#version of idnes.cz archive webscraper that uses the faster asynchronous approach
+
+import asyncio
+import aiohttp
+import pandas as pd
+from bs4 import BeautifulSoup
+
+async def fetch(session, url):
+    async with session.get(url) as response:
+        return await response.text()
+
+async def main():
+    # define the number of pages to scrape
+    num_pages = [1, 2]
+
+    # create an empty list to store the titles
+    titles = []
+    text = []
+    link_list = []
+    idnestexty = pd.DataFrame(
+        {"Title of the article": titles,
+         'URL to the article': link_list,
+         'Text contents of the article': text
+        })
+
+    async with aiohttp.ClientSession() as session:
+        # loop through each page
+        for i in num_pages:
+            url = f"https://www.idnes.cz/zpravy/archiv/{i}"
+            page = await fetch(session, url)
+            doc = BeautifulSoup(page, "html.parser")
+            title_elements = doc.select(".art h3")
+            for element in title_elements:
+                title_el = element.text
+                title_el = title_el.strip()
+                titles.append(title_el)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, "html.parser")
+                link_elements = soup.select("#list-art-count .art-link")
+                tasks = []
+                for element in link_elements:
+                    link = element["href"]
+                    link_list.append(link)
+                    tasks.append(fetch(session, link))
+                responses = await asyncio.gather(*tasks)
+                for response in responses:
+                    linked_soup = BeautifulSoup(response, "html.parser")
+                    text.append(linked_soup.select(".opener , #art-text p"))
+            idnespagetexts = pd.DataFrame(
+                {"Title of the article": titles,
+                 'URL to the article': link_list,
+                 'Text contents of the article': text
+                })
+            idnestexty = idnestexty.append(idnespagetexts)
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
+
+```
+
